@@ -354,8 +354,6 @@ class Logger(object):
 
     def logkv_mean(self, key, val):
         oldval, cnt = self.name2val[key], self.name2cnt[key]
-        if key == 'grad_norm':
-            print(f"grad_norm oldval : {oldval}, val : {val}, cnt : {cnt}")
         
         self.name2val[key] = oldval * cnt / (cnt + 1) + val / (cnt + 1)
         self.name2cnt[key] = cnt + 1
@@ -476,7 +474,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
     os.makedirs(os.path.expanduser(dir), exist_ok=True)
 
     rank = get_rank_without_mpi_import()
-    print(f"******************** rank : {rank}")
+#     print(f"******************** rank : {rank}")
     if rank > 0:
         log_suffix = log_suffix + "-rank%03i" % rank
 

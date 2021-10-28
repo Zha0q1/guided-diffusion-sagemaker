@@ -35,8 +35,6 @@ def main():
     ##########################################################################################################
     dist_util.setup_dist()
     logger.configure()
-    
-    resource_check()
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
@@ -121,28 +119,6 @@ def check_sagemaker(args):
         os.makedirs(os.environ['OPENAI_LOGDIR'], exist_ok=True)
         os.makedirs(os.environ['DIFFUSION_BLOB_LOGDIR'], exist_ok=True)
     return args
-
-
-def resource_check():
-    import os
-    if os.environ["RANK"] == '0':
-        import subprocess
-
-        result = subprocess.run(['df', '-h'], stdout=subprocess.PIPE)
-        print("Disk Size:", result.stdout.decode('utf-8'))
-        result = subprocess.run(['df', '-ih'], stdout=subprocess.PIPE)
-        print("Disk Size (inode) : ", result.stdout.decode('utf-8'))        
-
-        result = subprocess.run(['df', '-h', '/opt/ml/checkpoints'], stdout=subprocess.PIPE)
-        print("/opt/ml/checkpoints : ", result.stdout.decode('utf-8'))
-        result = subprocess.run(['df', '-h', '/opt/ml/model'], stdout=subprocess.PIPE)
-        print("/opt/ml/model : ", result.stdout.decode('utf-8'))   
-        
-        result = subprocess.run(['df', '-h', '/opt/ml/code'], stdout=subprocess.PIPE)
-        print("/opt/ml/code", result.stdout.decode('utf-8'))
-        result = subprocess.run(['df', '-h', '/opt/ml/input/data'], stdout=subprocess.PIPE)
-        print("/opt/ml/input/data", result.stdout.decode('utf-8'))   
-        
         
         
 if __name__ == "__main__":

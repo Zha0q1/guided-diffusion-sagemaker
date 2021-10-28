@@ -257,6 +257,8 @@ class TrainLoop:
                     filename = f"model{(self.step+self.resume_step):06d}.pt"
                 else:
                     filename = f"ema_{rate}_{(self.step+self.resume_step):06d}.pt"
+                    
+                os.makedirs(get_blob_logdir(), exist_ok=True)
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -267,8 +269,8 @@ class TrainLoop:
         ### SageMaker
         if dist.get_rank() == 0:
             with bf.BlobFile(
-#                 bf.join(get_blob_logdir(), f"opt{(self.step+self.resume_step):06d}.pt"),
-                bf.join(os.environ['SM_MODEL_DIR'], f"opt{(self.step+self.resume_step):06d}.pt"),  ## model_dir revised for SageMaker
+                bf.join(get_blob_logdir(), f"opt{(self.step+self.resume_step):06d}.pt"),
+#                 bf.join(os.environ['SM_MODEL_DIR'], f"opt{(self.step+self.resume_step):06d}.pt"),  ## model_dir revised for SageMaker
                 "wb",
             ) as f:
                 th.save(self.opt.state_dict(), f)

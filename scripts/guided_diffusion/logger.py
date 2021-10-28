@@ -169,6 +169,7 @@ class TensorBoardOutputFormat(KVWriter):
         self.writer = pywrap_tensorflow.EventsWriter(compat.as_bytes(path))
 
     def writekvs(self, kvs):
+        print("####################### TensorBoard ##########################")
         def summary_val(k, v):
             kwargs = {"tag": k, "simple_value": float(v)}
             return self.tf.Summary.Value(**kwargs)
@@ -178,9 +179,13 @@ class TensorBoardOutputFormat(KVWriter):
         event.step = (
             self.step
         )  # is there any reason why you'd want to specify the step?
+        
+#         print(f"******************** self.step : {self.step}")
+#         print(f"******************** event : {event}")
         self.writer.WriteEvent(event)
         self.writer.Flush()
         self.step += 1
+   
 
     def close(self):
         if self.writer:
@@ -349,6 +354,9 @@ class Logger(object):
 
     def logkv_mean(self, key, val):
         oldval, cnt = self.name2val[key], self.name2cnt[key]
+        if key == 'grad_norm':
+            print(f"grad_norm oldval : {oldval}, val : {val}, cnt : {cnt}")
+        
         self.name2val[key] = oldval * cnt / (cnt + 1) + val / (cnt + 1)
         self.name2cnt[key] = cnt + 1
 
@@ -363,6 +371,7 @@ class Logger(object):
                     for (name, val) in self.name2val.items()
                 },
             )
+                
             if self.comm.rank != 0:
                 d["dummy"] = 1  # so we don't get a warning about empty dict
         out = d.copy()  # Return the dict for unit testing purposes
@@ -371,6 +380,17 @@ class Logger(object):
                 fmt.writekvs(d)
         self.name2val.clear()
         self.name2cnt.clear()
+        
+        if os.environ['LOCAL_RANK'] == '0':
+            import subprocess
+#             print(f"self.dir : {self.dir}")
+            tmp_path = os.environ['S3_LOG_PATH']
+#             print(f"tmp_path : {tmp_path}")
+            cmd = ["aws", "s3", "sync", self.dir, os.environ['S3_LOG_PATH']]
+
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p.wait()    
+        
         return out
 
     def log(self, *args, level=INFO):
@@ -445,6 +465,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")
+#         print(f"_configure_dir : {dir}")
     if dir is None:
         dir = osp.join(
             tempfile.gettempdir(),
@@ -455,12 +476,14 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
     os.makedirs(os.path.expanduser(dir), exist_ok=True)
 
     rank = get_rank_without_mpi_import()
+    print(f"******************** rank : {rank}")
     if rank > 0:
         log_suffix = log_suffix + "-rank%03i" % rank
 
     if format_strs is None:
         if rank == 0:
-            format_strs = os.getenv("OPENAI_LOG_FORMAT", "stdout,log,csv").split(",")
+#             format_strs = os.getenv("OPENAI_LOG_FORMAT", "stdout,log,csv").split(",")
+            format_strs = os.getenv("OPENAI_LOG_FORMAT", "stdout,log,csv,tensorboard").split(",")
         else:
             format_strs = os.getenv("OPENAI_LOG_FORMAT_MPI", "log").split(",")
     format_strs = filter(None, format_strs)

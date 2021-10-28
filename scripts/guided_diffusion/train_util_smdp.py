@@ -108,6 +108,7 @@ class TrainLoop:
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
                 find_unused_parameters=False,
+#                 gradient_accumulation_steps=self.batch_size//self.microbatch
             )
         else:
             if dist.get_world_size() > 1:
@@ -177,7 +178,7 @@ class TrainLoop:
             
             if dist.get_rank() == 0:
                 # Waiting until finishing operations on GPU (Pytorch default: async)
-                th.cuda.synchronize()
+#                 th.cuda.synchronize()
                 batch_duration = time.time() - start
 
                 print('Step: [{0}][{1}] '
@@ -190,6 +191,9 @@ class TrainLoop:
                 
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
+                import glob
+                tmp = os.environ['OPENAI_LOGDIR'] + "/*"
+#                 print(f"tmp : {glob.glob(tmp)}")
             if self.step % self.save_interval == 0:
                 self.save()
                 # Run for a finite amount of time in integration tests.
@@ -283,8 +287,8 @@ class TrainLoop:
 
         if dist.get_rank() == 0:
             with bf.BlobFile(
-#                 bf.join(get_blob_logdir(), f"opt{(self.step+self.resume_step):06d}.pt"),
-                bf.join(os.environ['SM_MODEL_DIR'], f"opt{(self.step+self.resume_step):06d}.pt"),  ## model_dir revised for SageMaker
+                bf.join(get_blob_logdir(), f"opt{(self.step+self.resume_step):06d}.pt"),
+#                 bf.join(os.environ['SM_MODEL_DIR'], f"opt{(self.step+self.resume_step):06d}.pt"),  ## model_dir revised for SageMaker
                 "wb",
             ) as f:
                 th.save(self.opt.state_dict(), f)

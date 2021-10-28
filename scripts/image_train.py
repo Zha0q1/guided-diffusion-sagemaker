@@ -16,6 +16,7 @@ from guided_diffusion.script_util import (
 )
 # from guided_diffusion.train_util import TrainLoop  ## SageMaker
 
+
 def main():
     args = create_argparser().parse_args()
 
@@ -34,6 +35,8 @@ def main():
     ##########################################################################################################
     dist_util.setup_dist()
     logger.configure()
+    
+    resource_check()
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
@@ -41,7 +44,7 @@ def main():
     )
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
-
+    
     logger.log("creating data loader...")
     data = load_data(
         data_dir=args.data_dir,
@@ -49,7 +52,8 @@ def main():
         image_size=args.image_size,
         class_cond=args.class_cond,
     )
-        
+    
+#     print(f"use_fp16 : {args.use_fp16}")
     logger.log("training...")
     TrainLoop(
         model=model,
@@ -85,6 +89,7 @@ def create_argparser():
         resume_checkpoint="",
         use_fp16=False,
         fp16_scale_growth=1e-3,
+        s3_log_path="s3://",
         sagemakerdp=False      ##### 2. SageMaker DDP
     )
     defaults.update(model_and_diffusion_defaults())
@@ -101,11 +106,44 @@ def check_sagemaker(args):
 #     print(f"os.environ : {os.environ}")
     if os.environ['SM_MODEL_DIR'] is not None:
         args.data_dir = os.environ['SM_CHANNEL_TRAINING']
-#         args.resume_checkpoint = '/opt/ml/code/checkpoints/cifar10_uncond_50M_500K.pt'
-        os.environ['DIFFUSION_BLOB_LOGDIR'] = '/opt/ml/checkpoints'
-#         os.environ['DIFFUSION_BLOB_LOGDIR'] = os.environ['SM_MODEL_DIR']
-    
+        try:
+            job_name = os.environ['SAGEMAKER_JOB_NAME']
+        except:
+            import datetime
+            job_name = datetime.datetime.now().strftime("diffusion-%Y-%m-%d-%H-%M-%S-%f")
+            pass
+        os.environ['JOB_NAME'] = job_name
+        os.environ['OPENAI_LOGDIR'] = '/tmp/' + os.environ['JOB_NAME']
+        os.environ['DIFFUSION_BLOB_LOGDIR'] = '/opt/ml/checkpoints/' + os.environ['JOB_NAME']
+        os.environ['S3_LOG_PATH'] = args.s3_log_path + "/" + os.environ['JOB_NAME']
+        
+        ## Create Directory
+        os.makedirs(os.environ['OPENAI_LOGDIR'], exist_ok=True)
+        os.makedirs(os.environ['DIFFUSION_BLOB_LOGDIR'], exist_ok=True)
     return args
 
+
+def resource_check():
+    import os
+    if os.environ["RANK"] == '0':
+        import subprocess
+
+        result = subprocess.run(['df', '-h'], stdout=subprocess.PIPE)
+        print("Disk Size:", result.stdout.decode('utf-8'))
+        result = subprocess.run(['df', '-ih'], stdout=subprocess.PIPE)
+        print("Disk Size (inode) : ", result.stdout.decode('utf-8'))        
+
+        result = subprocess.run(['df', '-h', '/opt/ml/checkpoints'], stdout=subprocess.PIPE)
+        print("/opt/ml/checkpoints : ", result.stdout.decode('utf-8'))
+        result = subprocess.run(['df', '-h', '/opt/ml/model'], stdout=subprocess.PIPE)
+        print("/opt/ml/model : ", result.stdout.decode('utf-8'))   
+        
+        result = subprocess.run(['df', '-h', '/opt/ml/code'], stdout=subprocess.PIPE)
+        print("/opt/ml/code", result.stdout.decode('utf-8'))
+        result = subprocess.run(['df', '-h', '/opt/ml/input/data'], stdout=subprocess.PIPE)
+        print("/opt/ml/input/data", result.stdout.decode('utf-8'))   
+        
+        
+        
 if __name__ == "__main__":
     main()

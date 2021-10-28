@@ -170,8 +170,12 @@ class MixedPrecisionTrainer:
             self.master_params = make_master_params(self.param_groups_and_shapes)
             self.model.convert_to_fp16()
 
+
     def zero_grad(self):
         zero_grad(self.model_params)
+        # also zero the msater copy
+        zero_grad(self.master_params)
+ 
 
     def backward(self, loss: th.Tensor):
         if self.use_fp16:
@@ -200,6 +204,7 @@ class MixedPrecisionTrainer:
         logger.logkv_mean("param_norm", param_norm)
 
         self.master_params[0].grad.mul_(1.0 / (2 ** self.lg_loss_scale))
+        self.master_params[1].grad.mul_(1.0 / (2 ** self.lg_loss_scale))
         opt.step()
         zero_master_grads(self.master_params)
         master_params_to_model_params(self.param_groups_and_shapes, self.master_params)
@@ -217,6 +222,8 @@ class MixedPrecisionTrainer:
         grad_norm = 0.0
         param_norm = 0.0
         for p in self.master_params:
+#             print(f"*** P : {p}")
+            
             with th.no_grad():
                 param_norm += th.norm(p, p=2, dtype=th.float32).item() ** 2
                 if p.grad is not None:

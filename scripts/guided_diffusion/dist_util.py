@@ -20,6 +20,7 @@ SETUP_RETRY_COUNT = 3
 def setup_dist():
     import json
     
+    
     backend = "gloo" if not th.cuda.is_available() else "nccl"
     hostname = json.loads(os.environ['SM_HOSTS'])[0]
 
@@ -28,15 +29,20 @@ def setup_dist():
     local_rank = os.environ['OMPI_COMM_WORLD_LOCAL_RANK']
     os.environ["SMDDP"] = "0"
 
-    dist.init_process_group(backend=backend,
-                                    rank=int(rank),
-                                    world_size=int(world_size))
 
     os.environ["RANK"] = rank
     os.environ["LOCAL_RANK"] = local_rank
     os.environ["WORLD_SIZE"] = world_size
     os.environ["MASTER_ADDR"] = hostname
     os.environ["CUDA_VISIBLE_DEVICES"] = local_rank
+#     os.environ['MASTER_PORT'] = "7777"
+    
+    dist.init_process_group(backend=backend,
+                                    rank=int(rank),
+                                    world_size=int(world_size))    
+    
+    
+#     print(f"*************** os.environ : {os.environ}")
     
 # def setup_dist_bak():
 #     """
@@ -77,33 +83,52 @@ def load_state_dict(path, **kwargs):
     """
     Load a PyTorch file without redundant fetches across MPI ranks.
     """
-    chunk_size = 2 ** 30  # MPI has a relatively small size limit
-#     if MPI.COMM_WORLD.Get_rank() == 0: ## SageMaker
-    if os.environ["RANK"] == "0":
-        with bf.BlobFile(path, "rb") as f:
-            data = f.read()
-        num_chunks = len(data) // chunk_size
-        if len(data) % chunk_size:
-            num_chunks += 1
-        MPI.COMM_WORLD.bcast(num_chunks)
-        for i in range(0, len(data), chunk_size):
-            MPI.COMM_WORLD.bcast(data[i : i + chunk_size])
-    else:
-        num_chunks = MPI.COMM_WORLD.bcast(None)
-        data = bytes()
-        for _ in range(num_chunks):
-            data += MPI.COMM_WORLD.bcast(None)
+    
+#     if MPI.COMM_WORLD.Get_rank() == 0:
+    with bf.BlobFile(path, "rb") as f:
+        data = f.read()
+#     else:
+#         data = None
 
+#     data = MPI.COMM_WORLD.bcast(data)  ### Not working in SageMaker
     return th.load(io.BytesIO(data), **kwargs)
+
+
+# def load_state_dict(path, **kwargs):
+#     """
+#     Load a PyTorch file without redundant fetches across MPI ranks.
+#     """
+#     chunk_size = 2 ** 30  # MPI has a relatively small size limit
+# #     if MPI.COMM_WORLD.Get_rank() == 0: ## SageMaker
+#     if os.environ["RANK"] == "0":
+#         with bf.BlobFile(path, "rb") as f:
+#             data = f.read()
+#         num_chunks = len(data) // chunk_size
+#         if len(data) % chunk_size:
+#             num_chunks += 1
+#         MPI.COMM_WORLD.bcast(num_chunks)
+#         for i in range(0, len(data), chunk_size):
+#             MPI.COMM_WORLD.bcast(data[i : i + chunk_size])
+#     else:
+#         num_chunks = MPI.COMM_WORLD.bcast(None)
+#         data = bytes()
+#         for _ in range(num_chunks):
+#             data += MPI.COMM_WORLD.bcast(None)
+
+#     return th.load(io.BytesIO(data), **kwargs)
 
 
 def sync_params(params):
     """
     Synchronize a sequence of Tensors across ranks from rank 0.
     """
+    print("sync_params call")
+    th.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    th.cuda.empty_cache()
     for p in params:
         with th.no_grad():
             dist.broadcast(p, 0)
+
 
 
 def _find_free_port():

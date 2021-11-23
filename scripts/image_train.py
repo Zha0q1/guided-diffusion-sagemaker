@@ -16,8 +16,13 @@ from guided_diffusion.script_util import (
 )
 # from guided_diffusion.train_util import TrainLoop  ## SageMaker
 
+import os
 
-def main():
+def main():    
+    
+    import time
+    start = time.time()
+    
     args = create_argparser().parse_args()
 
     ######################################## 1. Add path for SageMaker #######################################
@@ -51,6 +56,16 @@ def main():
         class_cond=args.class_cond,
     )
     
+    
+#     import aws_util
+
+#     if os.environ["LOCAL_RANK"] == "0":
+#         job_name = os.environ['JOB_NAME']
+
+#         gpu_mon_thread = aws_util.GPUMon(device_index=int(os.environ['RANK']), job_name=os.environ['JOB_NAME'])
+#         gpu_mon_thread.start()
+        
+        
 #     print(f"use_fp16 : {args.use_fp16}")
     logger.log("training...")
     TrainLoop(
@@ -71,6 +86,12 @@ def main():
         lr_anneal_steps=args.lr_anneal_steps,
     ).run_loop()
 
+    training_duration = time.time() - start
+
+    print('total_training_time={0:.3f}'.format(training_duration))
+    
+#     if os.environ["LOCAL_RANK"] == "0":
+#         gpu_mon_thread.kill()
 
 def create_argparser():
     defaults = dict(
@@ -101,7 +122,7 @@ def check_sagemaker(args):
     import json
     
     ## SageMaker
-#     print(f"os.environ : {os.environ}")
+    print(f"os.environ : {os.environ}")
     if os.environ['SM_MODEL_DIR'] is not None:
         args.data_dir = os.environ['SM_CHANNEL_TRAINING']
         try:
@@ -112,14 +133,20 @@ def check_sagemaker(args):
             pass
         os.environ['JOB_NAME'] = job_name
         os.environ['OPENAI_LOGDIR'] = '/tmp/' + os.environ['JOB_NAME']
-        os.environ['DIFFUSION_BLOB_LOGDIR'] = '/opt/ml/checkpoints/' + os.environ['JOB_NAME']
+#         os.environ['DIFFUSION_BLOB_LOGDIR'] = '/opt/ml/checkpoints/' + os.environ['JOB_NAME']
+        os.environ['DIFFUSION_BLOB_LOGDIR'] = '/opt/ml/checkpoints'
         os.environ['S3_LOG_PATH'] = args.s3_log_path + "/" + os.environ['JOB_NAME']
+        
         
         ## Create Directory
         os.makedirs(os.environ['OPENAI_LOGDIR'], exist_ok=True)
         os.makedirs(os.environ['DIFFUSION_BLOB_LOGDIR'], exist_ok=True)
+        if args.resume_checkpoint or not args.resume_checkpoint == "":
+            args.resume_checkpoint = os.environ['SM_CHANNEL_CHECKPOINT'] + "/" + args.resume_checkpoint
+#         args.resume_checkpoint = os.environ['SM_CHANNEL_CHECKPOINT']
     return args
-        
+
+
         
 if __name__ == "__main__":
     main()

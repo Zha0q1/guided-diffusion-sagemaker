@@ -90,6 +90,12 @@ class TrainLoop:
 
         if th.cuda.is_available():
             self.use_ddp = True
+#             print("TEST  1")
+            
+#             print(f"XXXXX dist_util.dev() : {dist_util.dev()}")
+            th.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+            th.cuda.empty_cache()
+            
             self.ddp_model = DDP(
                 self.model,
                 device_ids=[dist_util.dev()],
@@ -98,6 +104,10 @@ class TrainLoop:
                 bucket_cap_mb=128,
                 find_unused_parameters=False,
             )
+            
+#             print(f"1 dist_util.dev() : {dist_util.dev()}")
+            
+            
         else:
             if dist.get_world_size() > 1:
                 logger.warn(
@@ -113,6 +123,7 @@ class TrainLoop:
         if resume_checkpoint:
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
             if dist.get_rank() == 0:
+#                 print(f"2 dist_util.dev() : {dist_util.dev()}")
                 logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
                 self.model.load_state_dict(
                     dist_util.load_state_dict(
@@ -129,6 +140,7 @@ class TrainLoop:
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
         if ema_checkpoint:
             if dist.get_rank() == 0:
+#                 print(f"3 dist_util.dev() : {dist_util.dev()}")
                 logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
                 state_dict = dist_util.load_state_dict(
                     ema_checkpoint, map_location=dist_util.dev()
@@ -144,6 +156,7 @@ class TrainLoop:
             bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
         )
         if bf.exists(opt_checkpoint):
+#             print(f"4 dist_util.dev() : {dist_util.dev()}")
             logger.log(f"loading optimizer state from checkpoint: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
                 opt_checkpoint, map_location=dist_util.dev()
@@ -199,6 +212,7 @@ class TrainLoop:
     def forward_backward(self, batch, cond):
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
+#             print(f"5 dist_util.dev() : {dist_util.dev()}")
             micro = batch[i : i + self.microbatch].to(dist_util.dev())
             micro_cond = {
                 k: v[i : i + self.microbatch].to(dist_util.dev())
@@ -249,6 +263,9 @@ class TrainLoop:
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
 
     def save(self):
+        import time
+        start = time.time()
+        
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
@@ -275,9 +292,14 @@ class TrainLoop:
             ) as f:
                 th.save(self.opt.state_dict(), f)
 
-
+#         print(f"7 dist_util.dev() : {dist_util.dev()}")
         dist.barrier()
+#         print(f"8 dist_util.dev() : {dist_util.dev()}")
 
+
+        save_duration = time.time() - start
+
+        print('Save_Time={0:.3f}'.format(save_duration))
 
 def parse_resume_step_from_filename(filename):
     """

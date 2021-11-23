@@ -78,6 +78,15 @@ def dev():
     return th.device("cpu")
 
 
+# def load_state_dict(path, **kwargs):
+#     """
+#     Load a PyTorch file without redundant fetches across MPI ranks.
+#     """
+#     with bf.BlobFile(path, "rb") as f:
+#         data = f.read()
+#     return th.load(io.BytesIO(data), **kwargs)
+
+
 def load_state_dict(path, **kwargs):
     """
     Load a PyTorch file without redundant fetches across MPI ranks.

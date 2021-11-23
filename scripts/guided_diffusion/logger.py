@@ -15,6 +15,7 @@ import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 
+
 DEBUG = 10
 INFO = 20
 WARN = 30
@@ -380,15 +381,23 @@ class Logger(object):
         self.name2cnt.clear()
         
         if os.environ['LOCAL_RANK'] == '0':
-            import subprocess
+#             import time
+#             start = time.time()
+#             import subprocess
 #             print(f"self.dir : {self.dir}")
             tmp_path = os.environ['S3_LOG_PATH']
 #             print(f"tmp_path : {tmp_path}")
-            cmd = ["aws", "s3", "sync", self.dir, os.environ['S3_LOG_PATH']]
+#             cmd = ["aws", "s3", "sync", self.dir, os.environ['S3_LOG_PATH']]
 
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            p.wait()    
-        
+#             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#             p.wait()
+            
+#             down_duration = time.time() - start
+
+#             print('LOGUpload_Time={0:.3f}'.format(down_duration))
+
+            upload_local_to_s3(self.dir, os.environ['S3_LOG_PATH'])
+
         return out
 
     def log(self, *args, level=INFO):
@@ -514,3 +523,173 @@ def scoped_configure(dir=None, format_strs=None, comm=None):
         Logger.CURRENT.close()
         Logger.CURRENT = prevlogger
 
+
+        
+def upload_local_to_s3(src, dest):
+    import time
+    start = time.time()
+    
+    from pathlib import Path
+    s3 = boto3.client('s3')
+    
+    bucket_prefix=dest.split("s3://")[1]
+    bucket_prefix_split = bucket_prefix.split("/")
+    bucket = bucket_prefix_split[0]
+    prefix = bucket_prefix.replace(bucket + "/", '')
+
+    path = Path(src)
+    paths = []
+
+    for file_path in path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        src = str(file_path)
+        path = src.replace(f'{str(path)}/', "")
+        key = prefix +"/"+ path
+#         print(f"source : {src}, destination : {key}")
+        s3.upload_file(src, Bucket=bucket, Key=key)
+
+    down_duration = time.time() - start
+
+    print('LOGUpload_Time={0:.3f}'.format(down_duration))
+    
+
+from pathlib import Path
+from bisect import bisect_left
+
+import boto3
+
+
+class S3Sync:
+    """
+    Class that holds the operations needed for synchronize local dirs to a given bucket.
+    파일 리스트는 특정 순서를 가질 수 있도록 저장되어야 합니다.
+    """
+
+    def __init__(self):
+        self._s3 = boto3.client('s3')
+        self._s3_resource = boto3.resource('s3')
+
+    def sync(self, source: str, dest: str, force=True) -> [str]:
+        """
+        Sync source to dest, this means that all elements existing in
+        source that not exists in dest will be copied to dest.
+
+        No element will be deleted.
+
+        :param source: Source folder.
+        :param dest: Destination folder.
+
+        :return: None
+        """
+
+        bucket_prefix=dest.split("s3://")[1]
+        bucket_prefix_split = bucket_prefix.split("/")
+        bucket = bucket_prefix_split[0]
+        prefix = bucket_prefix.replace(bucket + "/", '')
+        
+        
+        paths = self.list_source_objects(source_folder=source)
+        objects = self.list_bucket_objects(bucket, prefix)
+        
+#         print(f"objects : {objects}")
+
+        # Getting the keys and ordering to perform binary search
+        # each time we want to check if any paths is already there.
+        if len(objects) > 0:
+            object_keys = [obj.key.split("/")[-1] for obj in objects]
+        else:
+            object_keys = []
+#         object_keys.sort()
+        object_keys_length = len(object_keys)
+        
+
+        
+        if not force:
+            object_keys_set = set(object_keys)
+            paths_set = set(paths)
+            paths = paths_set.difference(object_keys_set)  ## 이름만 확인하고, update 내용을 체크하지 못함
+
+        for path in paths:
+            # If path not found in object_keys, it has to be sync-ed.
+            src = str(Path(source).joinpath(path))
+            key = prefix +"/"+ path
+#             print(f"source : {src}, destination : {key}")
+            self._s3.upload_file(src, Bucket=bucket, Key=key)    
+    
+    
+        
+#         for path in paths:
+#             # Binary search.
+#             index = bisect_left(object_keys, path)
+#             if index == object_keys_length:
+#                 # If path not found in object_keys, it has to be sync-ed.
+#                 src = str(Path(source).joinpath(path))
+#                 key = prefix +"/"+ path
+#                 print(f"source : {src}, destination : {key}")
+#                 self._s3.upload_file(src, Bucket=bucket, Key=key)
+
+    def list_bucket_objects(self, bucket: str, prefix: str) -> [dict]:
+        """
+        List all objects for the given bucket.
+
+        :param bucket: Bucket name.
+        :return: A [dict] containing the elements in the bucket.
+
+        Example of a single object.
+
+        {
+            'Key': 'example/example.txt',
+            'LastModified': datetime.datetime(2019, 7, 4, 13, 50, 34, 893000, tzinfo=tzutc()),
+            'ETag': '"b11564415be7f58435013b414a59ae5c"',
+            'Size': 115280,
+            'StorageClass': 'STANDARD',
+            'Owner': {
+                'DisplayName': 'webfile',
+                'ID': '75aa57f09aa0c8caeab4f8c24e99d10f8e7faeebf76c078efc7c6caea54ba06a'
+            }
+        }
+
+        """
+        try:
+#             print(f"bucket : {bucket}, prefix : {prefix}")
+            response = self._s3_resource.Bucket(bucket).objects.filter(Prefix=prefix)
+            contents = list(response)
+            
+        except KeyError:
+            # No Contents Key, empty bucket.
+            return []
+        else:
+            return contents
+
+    @staticmethod
+    def list_source_objects(source_folder: str) -> [str]:
+        """
+        :param source_folder:  Root folder for resources you want to list.
+        :return: A [str] containing relative names of the files.
+
+        Example:
+
+            /tmp
+                - example
+                    - file_1.txt
+                    - some_folder
+                        - file_2.txt
+
+            >>> sync.list_source_objects("/tmp/example")
+            ['file_1.txt', 'some_folder/file_2.txt']
+
+        """
+
+        path = Path(source_folder)
+
+        paths = []
+
+        for file_path in path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            str_file_path = str(file_path)
+            str_file_path = str_file_path.replace(f'{str(path)}/', "")
+            paths.append(str_file_path)
+
+        return paths

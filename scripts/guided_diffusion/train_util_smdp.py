@@ -101,6 +101,10 @@ class TrainLoop:
 
         if th.cuda.is_available():
             self.use_ddp = True
+            
+            th.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+            th.cuda.empty_cache()
+            
             self.ddp_model = DDP(
                 self.model,
                 device_ids=[int(os.environ["LOCAL_RANK"])],  ## SageMaker
@@ -124,13 +128,13 @@ class TrainLoop:
 
         if resume_checkpoint:
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
-            if dist.get_rank() == 0:
-                logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
-                self.model.load_state_dict(
-                    dist_util.load_state_dict(
-                        resume_checkpoint, map_location=dist_util.dev()
-                    )
+
+            logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
+            self.model.load_state_dict(
+                dist_util.load_state_dict(
+                    resume_checkpoint, map_location=dist_util.dev()
                 )
+            )
 
         dist_util.sync_params(self.model.parameters())
 
@@ -140,12 +144,11 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
         if ema_checkpoint:
-            if dist.get_rank() == 0:
-                logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
-                state_dict = dist_util.load_state_dict(
-                    ema_checkpoint, map_location=dist_util.dev()
-                )
-                ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
+            logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
+            state_dict = dist_util.load_state_dict(
+                ema_checkpoint, map_location=dist_util.dev()
+            )
+            ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
 
         dist_util.sync_params(ema_params)
         return ema_params
@@ -270,6 +273,10 @@ class TrainLoop:
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
 
     def save(self):
+        
+        import time
+        start = time.time()
+        
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
@@ -294,6 +301,10 @@ class TrainLoop:
                 th.save(self.opt.state_dict(), f)
 
         dist.barrier()
+        
+        save_duration = time.time() - start
+
+        print('Save_Time={0:.3f}'.format(save_duration))
 
 
 def parse_resume_step_from_filename(filename):
@@ -322,7 +333,29 @@ def get_blob_logdir():
 def find_resume_checkpoint():
     # On your infrastructure, you may want to override this to automatically
     # discover the latest checkpoint on your blob storage, etc.
-    return None
+
+    opt_list = []
+    ema_list = []
+    model_list = []
+    
+    sm_checkpoint_path = os.environ['DIFFUSION_BLOB_LOGDIR']
+
+    for cktroot, cktdirs, cktfiles in os.walk(sm_checkpoint_path):
+        if len(cktfiles) > 0:
+            for cktfile in cktfiles:
+                flag = cktfile[:3]
+                if flag == 'opt':
+                    opt_list.append(cktfile)
+                elif flag == 'mod':
+                    model_list.append(cktfile)
+                elif flag == 'ema':
+                    ema_list.append(cktfile)
+            resume_checkpoint = cktroot + "/" + sorted(model_list)[-1]
+        else:
+            resume_checkpoint = None
+    
+    print(f"******** find_resume_checkpoint : {resume_checkpoint} ***********")
+    return resume_checkpoint
 
 
 def find_ema_checkpoint(main_checkpoint, step, rate):

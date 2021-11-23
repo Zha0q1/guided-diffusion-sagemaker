@@ -136,7 +136,7 @@ class TrainLoop:
                 )
             )
 
-        dist_util.sync_params(self.model.parameters())
+        #dist_util.sync_params(self.model.parameters())
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.mp_trainer.master_params)
@@ -150,7 +150,7 @@ class TrainLoop:
             )
             ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
 
-        dist_util.sync_params(ema_params)
+        #dist_util.sync_params(ema_params)
         return ema_params
 
     def _load_optimizer_state(self):
